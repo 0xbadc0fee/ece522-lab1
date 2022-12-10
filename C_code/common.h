@@ -22,7 +22,10 @@
 
 // Array constants
 #define MAX_DATA_VALS 4096
-#define MAX_HISTO_VALS 2048
+#define MAX_DIFFS_VALS 2048 //LAB1_MODS
+//#define MAX_HISTO_VALS 2048
+#define MAX_HISTO_VALS 1024 //LAB1_MODS
+
 
 // String size
 #define MAX_STRING_LEN 2000
@@ -33,11 +36,11 @@
 // NOTE: This is the range I'm using in the hardware. I find the smallest value in the distribution, subtract
 // that from all values (shifting the distribution left for negative largest values and right for positive). The
 // binning of values therefore starts at bin 0 and goes up through the largest positive value (minus the smallest value).
-#define DIST_RANGE 2048
+#define DIST_RANGE 1024 //LAB1_MODS
 
 // Represents +6.25% and -93.75% of 4096
-#define LV_BOUND 256
-#define HV_BOUND 3840
+#define LV_BOUND 128 //LAB1_MODS
+#define HV_BOUND 1920 //LAB1_MODS
 
 // =================================
 // GPIO constants
