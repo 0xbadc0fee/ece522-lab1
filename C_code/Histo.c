@@ -267,21 +267,32 @@ int main(int argc, char *argv[])
 // Allocate arrays
    if ( (data_arr_in = (short *)calloc(sizeof(short), MAX_DATA_VALS)) == NULL )
       { printf("ERROR: Failed to calloc data 'data_arr_in' array!\n"); exit(EXIT_FAILURE); }
+   if ( (data_diffs_arr_in = (short *)calloc(sizeof(short), MAX_DIFFS_VALS)) == NULL ) //LAB1_MODS
+      { printf("ERROR: Failed to calloc data 'data_diffs_arr_in' array!\n"); exit(EXIT_FAILURE); }//LAB1_MODS
    if ( (histo_arr_out = (short *)calloc(sizeof(short), MAX_HISTO_VALS)) == NULL )
       { printf("ERROR: Failed to calloc data 'histo_arr_out' array!\n"); exit(EXIT_FAILURE); }
    if ( (software_histo = (short *)calloc(sizeof(short), MAX_HISTO_VALS)) == NULL )
-      { printf("ERROR: Failed to calloc data 'histo_arr_out' array!\n"); exit(EXIT_FAILURE); }
+      { printf("ERROR: Failed to calloc data 'software_histo' array!\n"); exit(EXIT_FAILURE); }
+
+// Run Differencing Calc on Hi/Lo BRAM addresses == LAB1_MODS
+// Take pairwise values from data_arr_in, subract one from the other, store results in data_diffs_arr_in
+   for (int i = 0; i < MAX_DIFFS_VALS; ++i) {			//LAB1_MODS
+      int j = i + MAX_DIFFS_VALS;				//LAB1_MODS
+      data_diffs_arr_in[i] = data_arr_in[j] - data_arr_in[i];   //LAB1_MODS
+      }  
 
 // Read the data from the input file
-   num_vals = ReadData(MAX_STRING_LEN, MAX_DATA_VALS, infile_name, data_arr_in);
+//   num_vals = ReadData(MAX_STRING_LEN, MAX_DATA_VALS, infile_name, data_arr_in);
+   num_vals = ReadData(MAX_STRING_LEN, MAX_DIFFS_VALS, infile_name, data_arr_in);  //LAB1_MODS
+
 
 // Set the control mask to indicate enrollment. 
    ctrl_mask = 0;
       
 // ==================================================================================
-// Software computed values. Hardware reports mean WITH 4 bits of precision but range using ONLY the integer portion.
+// Software computed values. Hardware reports mean WITH 4 bits of precision but range using ONLY the integer portion. == //LAB1_MODS
    gettimeofday(&t0, 0);
-   ComputeHisto(MAX_DATA_VALS, num_vals, data_arr_in, (short)LV_BOUND, (short)HV_BOUND, (short)DIST_RANGE, precision_scaler,
+   ComputeHisto(MAX_DIFFS_VALS, num_vals, data_arr_in, (short)LV_BOUND, (short)HV_BOUND, (short)DIST_RANGE, precision_scaler,
       software_histo);
    gettimeofday(&t1, 0); elapsed = (t1.tv_sec-t0.tv_sec)*1000000 + t1.tv_usec-t0.tv_usec; 
    printf("\tSoftware Runtime %ld us\n\n", (long)elapsed);
