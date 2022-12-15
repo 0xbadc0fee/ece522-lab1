@@ -63,7 +63,7 @@ end Histo;
 
 -- LAB1_MODS, add state called find_pn_diffs
 architecture beh of Histo is
-   type state_type is (idle, clear_mem, find_pn_diffs,  find_smallest, compute_addr, inc_cell, get_next_PN, init_dist, sweep_BRAM, 
+   type state_type is (idle, clear_mem, get_pn_upper, get_pn_lower, get_pn_diffs, find_smallest, compute_addr, inc_cell, get_next_PN, init_dist, sweep_BRAM, 
       check_histo_error, write_range);
    signal state_reg, state_next: state_type;
 
@@ -81,15 +81,18 @@ architecture beh of Histo is
 -- LAB1_MODS, modify do_PN_histo_addr from 1 bit (std_logic) to 2 bits (std_logic_vector 1 downto 0) for the extra state cases.
 -- For selecting between PN or histo portion of memory during memory accesses
 --   signal do_PN_histo_addr: std_logic;
-   signal do_PN_histo_addr: unsigned(1 downto 0);
+   signal do_PN_histo_addr: std_logic_vector(1 downto 0);
 
 -- Stores the full 16-bit PN that is the smallest among all in the data set
    signal smallest_val_reg, smallest_val_next: signed(PNL_BRAM_DBITS_WIDTH_NB-1 downto 0);
+   
+-- LAB1_MODS, add signals necessary for doing arithmetic on the 16 bit values; pn_lower_val, pn_upper_val, & pn_diffs_val.
+   signal pn_upper_val, pn_lower_val, pn_diffs_val: signed(PNL_BRAM_DBITS_WIDTH_NB-1 downto 0);
 
 -- These are 12 bits each to hold only the 12-bit integer portion of the PNs
 -- LAB1_MODS, change integers from old 12bit PNs to new 13bit PN_DIFFS, will affect LV & HV BOUNDS SHL
-   signal shifted_dout: signed(PN_INTEGER_NB-1 downto 0);
-   signal shifted_smallest_val: signed(PN_INTEGER_NB-1 downto 0);
+   signal shifted_dout: signed(PN_DIFFS_INTEGER_NB-1 downto 0);
+   signal shifted_smallest_val: signed(PN_DIFFS_INTEGER_NB-1 downto 0);
 
 -- These signals used in the calculation of the address in the histogram memory of the cell to add 1 to during the histo
 -- contruction. They are addresses and therefore need to match the address width of the memory.
@@ -140,7 +143,7 @@ architecture beh of Histo is
 -- NOTE: 'HISTO_MAX_RANGE_NB" is 12 because the number of memory elements allocated for histo memory is 2^12 = 2048, so 12 bits are 
 -- needed to allow the range to reach 2048 (one bigger than 2047, which is 2^11).
 -- LAB1_MODS, to calculate correct range, use 1/2 the size of HISTO_MAX_RANGE since only using 1024 of the 2048 values prev allocated.
-   dist_range <= std_logic_vector(resize(HV_addr_reg - LV_addr_reg + 1,(HISTO_MAX_RANGE_NB/2)));
+   dist_range <= std_logic_vector(resize(HV_addr_reg - LV_addr_reg + 1,HISTO_MAX_RANGE_NB));
 
 
 -- =============================================================================================
@@ -153,9 +156,9 @@ architecture beh of Histo is
          state_reg <= idle;
          ready_reg <= '1';
          PN_addr_reg <= (others => '0');
-	 PN_uper_addr_reg <= (others =>, '0');
-	 PN_lower_addr_reg <= (others =>, '0');
-	 PN_diffs_addr_reg <= (others =>, '0');
+	     PN_upper_addr_reg <= (others => '0');
+	     PN_lower_addr_reg <= (others => '0');
+	     PN_diffs_addr_reg <= (others => '0');
          histo_addr_reg <= (others => '0');
          smallest_val_reg <= (others => '0');
          LV_addr_reg <= (others => '0');
@@ -165,13 +168,16 @@ architecture beh of Histo is
          dist_cnt_sum_reg <= (others => '0');
          dist_mean_sum_reg <= (others => '0');
          HISTO_ERR_reg <= '0';
+         pn_lower_val <= (others => '0');
+         pn_upper_val <= (others => '0');
+         pn_diffs_val <= (others => '0');
       elsif ( Clk'event and Clk = '1' ) then
          state_reg <= state_next;
          ready_reg <= ready_next;
          PN_addr_reg <= PN_addr_next;
-	 PN_upper_addr_reg <= PN_upper_addr_next;
-	 PN_lower_addr_reg <= PN_lower_addr_next;
-	 PN_diffs_addr_reg <= PN_diffs_addr_next;
+	     PN_upper_addr_reg <= PN_upper_addr_next;
+	     PN_lower_addr_reg <= PN_lower_addr_next;
+	     PN_diffs_addr_reg <= PN_diffs_addr_next;
          histo_addr_reg <= histo_addr_next;
          smallest_val_reg <= smallest_val_next;
          LV_addr_reg <= LV_addr_next;
@@ -181,6 +187,9 @@ architecture beh of Histo is
          dist_cnt_sum_reg <= dist_cnt_sum_next;
          dist_mean_sum_reg <= dist_mean_sum_next;
          HISTO_ERR_reg <= HISTO_ERR_next;
+         pn_lower_val <= pn_lower_val;
+         pn_upper_val <= pn_upper_val;
+         pn_diffs_val <= pn_diffs_val;
       end if; 
    end process;
 
@@ -205,7 +214,8 @@ architecture beh of Histo is
 -- 6.25% and 93.75% for the LV and HV bounds. With a total count across histo cells of 4096, the bounds become 256 and 3840. 
 -- LAB1_MODS, see notes in DataTypes_pkg.vhd, shift left value same (4) even though int is 13 bit, but total elements now 2048.
 -- LAB1_MODS, changed NUM_PNS_xx to NUM_DIFFS_PNS_xx
-   LV_bound <= to_unsigned(NUM_DIFFS_PNs, NUM_DIFFS_PNS_NB+1) srl HISTO_BOUND_PCT_SHIFT_NB;
+   LV_bound <= to_unsigned(NUM_DIFFS_PNs, NUM_DIFFS_PNS_NB+1) srl HISTO_BOUND_PCT_SHIFT_NB;
+--   LV_bound <= to_unsigned(NUM_PNs, NUM_PNS_NB+1) srl HISTO_BOUND_PCT_SHIFT_NB;
    HV_bound <= to_unsigned(NUM_DIFFS_PNs, NUM_DIFFS_PNS_NB+1) - LV_bound;
 
 -- =============================================================================================
@@ -213,12 +223,11 @@ architecture beh of Histo is
 -- =============================================================================================
 
    process (state_reg, start, ready_reg, PN_addr_reg, histo_addr_reg, PNL_BRAM_dout, histo_cell_addr,
-      LV_bound, HV_bound, LV_addr_reg, HV_addr_reg, LV_set_reg, HV_set_reg, dist_cnt_sum_reg, 
-      dist_cnt_sum_next, dist_mean_sum_reg, smallest_val_reg, dist_mean, dist_range, HISTO_ERR_reg, PN_upper_addr_reg)
+   LV_bound, HV_bound, LV_addr_reg, HV_addr_reg, LV_set_reg, HV_set_reg, dist_cnt_sum_reg, 
+   dist_cnt_sum_next, dist_mean_sum_reg, smallest_val_reg, dist_mean, dist_range, HISTO_ERR_reg, PN_upper_addr_reg)
       begin
       state_next <= state_reg;
       ready_next <= ready_reg;
-
       PN_addr_next <= PN_addr_reg;
       histo_addr_next <= histo_addr_reg;
       smallest_val_next <= smallest_val_reg;
@@ -229,7 +238,6 @@ architecture beh of Histo is
       dist_cnt_sum_next <= dist_cnt_sum_reg;
       dist_mean_sum_next <= dist_mean_sum_reg;
       HISTO_ERR_next <= HISTO_ERR_reg;
-
       PN_upper_addr_next <= PN_upper_addr_reg;
       PN_lower_addr_next <= PN_lower_addr_reg;
       PN_diffs_addr_next <= PN_diffs_addr_reg;
@@ -237,9 +245,9 @@ architecture beh of Histo is
 -- Default value is 0 -- used during memory initialization.
       PNL_BRAM_din <= (others=>'0');
       PNL_BRAM_we <= "0";
-
-      do_PN_histo_addr <= '0';
-
+      
+      do_PN_histo_addr <= "00";
+      
       case state_reg is
 
 -- =====================
@@ -253,12 +261,17 @@ architecture beh of Histo is
                HISTO_ERR_next <= '0';
 
 -- LAB1_MODS, Reset PN_upper_addr_reg to( PN_BRAM_BASE + 2048)
-	       PN_upper_addr_reg <= PN_BRAM_BASE + (PN_BRAM_BASE/2);
+	           PN_upper_addr_reg <= to_unsigned((PN_BRAM_BASE + (PN_BRAM_BASE/2)), PNL_BRAM_ADDR_SIZE_NB);
 -- Zero the register that will eventually define the mean.
                dist_mean_sum_next <= (others=>'0');
 
+-- LAB1_MODS, zero the upper, lower, and differening value regs
+               pn_lower_val <=(others=>'0');
+               pn_upper_val <=(others=>'0');
+               pn_diffs_val <=(others=>'0');
+               
 -- Allow histo_addr to drive PNL_BRAM
-               do_PN_histo_addr <= '1';
+               do_PN_histo_addr <= "01";
 
 -- Assert 'we' to zero out the first cell at 2048.
 -- LAB1_MODS, redirect next state after idle to state calc_diffs
@@ -274,44 +287,45 @@ architecture beh of Histo is
 -- for 2048 iteratiions, copy val from lwer address, copy val from upper addres, difference them, store results in diffs address, repeat or next state = 'clear mem'
 -- ====================
 -- LAB1_MODS, Get upper PN address & store to signal, continue to get_pn_lower if not complete, otherwise exit to 'clear_mem'
-	when get_pn_upper =>
-	    if ( PN_upper_addr_reg = PN_BRAM_UPPER_LIMIT -1) then
-		PNL_BRAM_we <= '0';
-		state_next <= clear_mem;
-	    else
-		PN_upper_addr_next <= PN_upper_addr_reg + 1;
-		do_PN_histo_addr <='2';
-		PN_upper_val <= signed(PNL_BRAM_dout);
-		state_next <= get_pn_lower;
-	    end if;
+	    when get_pn_upper =>
+	        if ( PN_upper_addr_reg = PN_UPPER_LIMIT -1) then
+		        PNL_BRAM_we <= "0";
+		        state_next <= clear_mem;
+	        else
+		        PN_upper_addr_next <= PN_upper_addr_reg + 1;
+		        do_PN_histo_addr <= "10";
+		        PN_upper_val <= signed(PNL_BRAM_dout);
+		        state_next <= get_pn_lower;
+	        end if;
 
 -- ====================
 -- LAB1_MODS, Get lower PN address & store to signal, continue to get_pn_diffs if not complete, otherwise exit to 'clear_mem'
-	when get_pn_lower =>
-	    if ( PN_upper_addr_reg = PN_BRAM_UPPER_LIMIT -1) then
-                PNL_BRAM_we <= '0';
-		state_next <= clear_mem;
-	    else		
-		PN_lower_addr_next <= PN_lower_addr_reg +1;
-		do_PN_histo_addr <= '0';
-		PN_lower_val <= signed(PNL_BRAM_dout);
-		state_next <= get_pn_diffs;
-	    end if;
+   	    when get_pn_lower =>
+	        if ( PN_upper_addr_reg = PN_UPPER_LIMIT -1) then
+                PNL_BRAM_we <= "0";
+		        state_next <= clear_mem;
+	        else		
+		        PN_lower_addr_next <= PN_lower_addr_reg +1;
+		        do_PN_histo_addr <= "00";
+		        PN_lower_val <= signed(PNL_BRAM_dout);
+		        state_next <= get_pn_diffs;
+	        end if;
 
 -- ====================
 -- LAB1_MODS, Calculate diffs and store back as address on BRAM, loop back to get_pn_upper if not complete, otherwise go to 'clear_mem'
-	when get_pn_diffs;
-	    if ( PN_upper_addr_reg = PN_BRAM_UPPER_LIMIT -1) then
-		PNL_BRAM_we <= '0';
-		state_next <= clear_mem;
-	    else
-		PN_diffs_addr_next <= PN_diffs_addr_reg +1;
-		do_PN_histo_addr <= '3';
-		PNL_BRAM_we <= '1';
-		PN_diffs_val <= PN_upper_val - PN_lower_val;
-		PN_diffs_addr_reg <= to_unsigned(PN_diffs_val, PNL_BRAM_ADDR_SIZE_NB);
-		state_next <= get_pn_lower;
-	    end if;
+	    when get_pn_diffs =>
+	        if ( PN_upper_addr_reg = PN_UPPER_LIMIT -1) then
+		        PNL_BRAM_we <= "0";
+		        state_next <= clear_mem;
+	        else
+		        PN_diffs_addr_next <= PN_diffs_addr_reg +1;
+		        do_PN_histo_addr <= "11";
+		        PNL_BRAM_we <= "1";
+		        PN_diffs_val <= PN_upper_val - PN_lower_val;
+                PNL_BRAM_din <= std_logic_vector(PN_diffs_val);		    
+--              PN_diffs_addr_reg <= to_unsigned(PN_diffs_val, PNL_BRAM_ADDR_SIZE_NB);
+		        state_next <= get_pn_lower;
+	        end if;
 
 -- LAB1_MODS, TEMP STOP @ 12-10-2022, NEED TO FINISH HISTO.VHD CHANGES AND TEST
 
@@ -328,7 +342,7 @@ architecture beh of Histo is
 -- On the first iteration here, we've already initialized the first memory location in the previous state.
 -- Do the second, etc.
             else
-               do_PN_histo_addr <= '1';
+               do_PN_histo_addr <= "01";
                PNL_BRAM_we <= "1";
                histo_addr_next <= histo_addr_reg + 1;
             end if;
@@ -361,7 +375,7 @@ architecture beh of Histo is
          when compute_addr =>
 
 -- Force address to histo portion for next write to memory
-            do_PN_histo_addr <= '1';
+            do_PN_histo_addr <= "01";
 
 -- histo_cell_addr is computed outside this process. It is the integer portion of the 'dout' value minus the smallest_val among
 -- all PNs. THIS IS ALWAYS an address in the range of 2048 and 4095.
@@ -383,7 +397,7 @@ architecture beh of Histo is
          when inc_cell =>
 
 -- Maintain address in histo memory for the write operation
-            do_PN_histo_addr <= '1';
+            do_PN_histo_addr <= "01";
 
 -- Add 1 to the cell pointed to by histo_addr and store it back. NOTE: I DO NOT need to check for OVERFLOW here b/c it is impossible 
 -- under the current parameters where we have at most 4096 total PN. Each cell is 16-bits so we can count to at least 2^16 = 65,536 
@@ -409,7 +423,7 @@ architecture beh of Histo is
          when init_dist =>
 
 -- Select histo memory
-            do_PN_histo_addr <= '1';
+            do_PN_histo_addr <= "01";
 
 -- Re-initialize histo address to first element of distribution. NOTE: The first cell is guaranteed to store at least a count of 1 
 -- since we offset all integer portions of the PN in the distribution by subtracting the smallest value.
@@ -432,11 +446,11 @@ architecture beh of Histo is
          when sweep_BRAM =>
 
 -- Select histo memory
-            do_PN_histo_addr <= '1';
+            do_PN_histo_addr <= "01";
 
 -- Add the count in the histo cell to the sum. NOTE: The counts are unsigned values. Note we resize to 13 bit to accomodate
 -- the value 4096
-            dist_cnt_sum_next <= dist_cnt_sum_reg + resize(unsigned(PNL_BRAM_dout), NUM_PNS_NB+1);
+            dist_cnt_sum_next <= dist_cnt_sum_reg + resize(unsigned(PNL_BRAM_dout), NUM_DIFFS_PNS_NB+1);
 
 -- Assign the LV address just when dist_cnt_sum_next becomes >= than the LV bound. LV_set also used to handle case 
 -- where the dist_sum never becomes >= LV_bound and is therefore, never assigned (which would happen if ALL the PNs are the
@@ -469,7 +483,7 @@ architecture beh of Histo is
 
 -- Just store the mean and range in the lowest portion of memory (addresses 0 and 1) for transfer to C program.
             else
-               do_PN_histo_addr <= '1';
+               do_PN_histo_addr <= "01";
                histo_addr_next <= to_unsigned(HISTO_BRAM_UPPER_LIMIT - 2, PNL_BRAM_ADDR_SIZE_NB);
                PNL_BRAM_we <= "1";
                PNL_BRAM_din <= dist_mean;
@@ -479,7 +493,7 @@ architecture beh of Histo is
 -- =====================
 -- Write range at address 1
          when write_range =>
-            do_PN_histo_addr <= '1';
+            do_PN_histo_addr <= "01";
             histo_addr_next <= to_unsigned(HISTO_BRAM_UPPER_LIMIT - 1, PNL_BRAM_ADDR_SIZE_NB);
             PNL_BRAM_we <= "1";
             PNL_BRAM_din <= (PNL_BRAM_DBITS_WIDTH_NB-1 downto HISTO_MAX_RANGE_NB => '0') & dist_range;
@@ -492,8 +506,8 @@ architecture beh of Histo is
 -- LAB1_MODS, need to add a select statement for pointing to PN_upper_addr_next, can reuse PN_addr_next as sub for PN_lower_addr_next.
 -- LAB1_MODS, don't use '1' for new select statement, already used for histo_addr_next (but can still keep pointed to others)
    with do_PN_histo_addr select
-      PNL_BRAM_addr <= std_logic_vector(PN_addr_next) when '0',
-		       std_logic_vector(PN_upper_addr_next) when '2',
+      PNL_BRAM_addr <= std_logic_vector(PN_addr_next) when "00",
+		               std_logic_vector(PN_upper_addr_next) when "10",
                        std_logic_vector(histo_addr_next) when others;
 
    HISTO_ERR <= HISTO_ERR_reg;
